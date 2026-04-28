@@ -1,0 +1,84 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/wait.h>
+
+// Helper function to print errors and exit
+void error_exit(const char *msg) {
+    perror(msg);
+    exit(EXIT_FAILURE);
+}
+
+// Example 1: Map a file into memory and print it (like "cat")
+void demo_file_mapping(const char *filename) {
+    int fd = open(filename, O_RDONLY);
+    if (fd == -1)
+        error_exit("open");
+
+    // Get file size
+    struct stat st;
+    if (fstat(fd, &st) == -1)
+        error_exit("fstat");
+
+    // Map the whole file into memory (read-only, private)
+    char *data = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (data == MAP_FAILED)
+        error_exit("mmap");
+
+    // Write file content to stdout
+    fwrite(data, 1, st.st_size, stdout);
+    printf("\n--- End of mapped file ---\n");
+
+    // Clean up
+    munmap(data, st.st_size);
+    close(fd);
+}
+
+// Example 2: Anonymous shared memory between parent and child
+void demo_anonymous_shared_memory() {
+    // Create an anonymous shared mapping (size: 4KB)
+    size_t size = 4096;
+    void *shared_mem = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                            MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (shared_mem == MAP_FAILED)
+        error_exit("mmap anonymous");
+
+    pid_t pid = fork();
+
+    if (pid == -1) {
+        error_exit("fork");
+    } else if (pid == 0) {
+        // Child process: write data into shared memory
+        const char *msg = "Hello from child!";
+        strcpy(shared_mem, msg);
+        printf("Child: wrote '%s' to shared memory\n", msg);
+        munmap(shared_mem, size);  // child can unmap its copy
+        exit(EXIT_SUCCESS);
+    } else {
+        // Parent process: wait for child and read data
+        wait(NULL);
+        printf("Parent: read from shared memory: '%s'\n", (char *)shared_mem);
+        munmap(shared_mem, size);
+    }
+}
+
+int main(int argc, char *argv[]) {
+    // Example 1: file mapping (requires a command-line argument)
+    if (argc > 1) {
+        printf("=== File mapping demo ===\n");
+        demo_file_mapping(argv[1]);
+    } else {
+        printf("No file provided. Skipping file mapping demo.\n");
+    }
+
+    // Example 2: anonymous shared memory between processes
+    printf("\n=== Anonymous shared memory demo ===\n");
+    demo_anonymous_shared_memory();
+
+    return 0;
+}
